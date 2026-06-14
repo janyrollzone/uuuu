@@ -90,6 +90,26 @@ class _GameBoardState extends State<GameBoard> with SingleTickerProviderStateMix
                     itemCount: provider.boardSize * provider.boardSize,
                     itemBuilder: (context, index) {
                       final token = provider.board[index];
+                      final isWinningCell = provider.status == GameStatus.won &&
+                          provider.winningLine.contains(index);
+
+                      Widget cellWidget = AnimatedTokenCell(
+                        token: token,
+                        boardSize: provider.boardSize,
+                      );
+
+                      // Hiệu ứng nhấp nháy cho các ô thuộc hàng thắng
+                      if (isWinningCell) {
+                        final winnerToken = provider.board[provider.winningLine.first];
+                        final highlightColor = winnerToken == 'X'
+                            ? const Color(0xFF00E5FF)
+                            : const Color(0xFFFF007F);
+                        cellWidget = PulsingCellHighlight(
+                          color: highlightColor,
+                          child: cellWidget,
+                        );
+                      }
+
                       return GestureDetector(
                         onTap: () {
                           if (token == null &&
@@ -102,16 +122,12 @@ class _GameBoardState extends State<GameBoard> with SingleTickerProviderStateMix
                               HapticFeedback.lightImpact();
                             }
 
-
-                            provider.makeMove(index);
+                             provider.makeMove(index);
                           }
                         },
                         behavior: HitTestBehavior.opaque,
                         child: Center(
-                          child: AnimatedTokenCell(
-                            token: token,
-                            boardSize: provider.boardSize,
-                          ),
+                          child: cellWidget,
                         ),
                       );
                     },
@@ -211,9 +227,10 @@ class _AnimatedTokenCellState extends State<AnimatedTokenCell> with SingleTicker
   @override
   void initState() {
     super.initState();
+    // Khởi tạo thời gian chạy hiệu ứng phóng to là 200ms
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 350),
+      duration: const Duration(milliseconds: 200),
     );
     _animation = CurvedAnimation(parent: _controller, curve: Curves.easeOutBack);
     _displayedToken = widget.token;
@@ -253,21 +270,25 @@ class _AnimatedTokenCellState extends State<AnimatedTokenCell> with SingleTicker
   Widget build(BuildContext context) {
     if (_displayedToken == null) return const SizedBox.shrink();
     
-    // Dynamic cell padding based on board size
+    // Tính toán khoảng cách căn lề ô cờ dựa trên kích thước bàn cờ
     final double paddingVal = max(1.5, 30.0 / widget.boardSize);
     
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
-        return Padding(
-          padding: EdgeInsets.all(paddingVal),
-          child: CustomPaint(
-            painter: TokenPainter(
-              token: _displayedToken!,
-              progress: _animation.value,
-              boardSize: widget.boardSize,
+        // Áp dụng hiệu ứng ScaleTransition (phóng to từ 0 đến kích thước gốc)
+        return ScaleTransition(
+          scale: _animation,
+          child: Padding(
+            padding: EdgeInsets.all(paddingVal),
+            child: CustomPaint(
+              painter: TokenPainter(
+                token: _displayedToken!,
+                progress: _animation.value,
+                boardSize: widget.boardSize,
+              ),
+              child: const SizedBox.expand(),
             ),
-            child: const SizedBox.expand(),
           ),
         );
       },
@@ -424,5 +445,62 @@ class WinningLinePainter extends CustomPainter {
         oldDelegate.winningPattern != winningPattern ||
         oldDelegate.color != color ||
         oldDelegate.boardSize != boardSize;
+  }
+}
+
+/// Widget tạo hiệu ứng nhấp nháy/phát xung nhẹ cho nền của ô cờ chiến thắng
+class PulsingCellHighlight extends StatefulWidget {
+  final Widget child;
+  final Color color;
+
+  const PulsingCellHighlight({
+    super.key,
+    required this.child,
+    required this.color,
+  });
+
+  @override
+  State<PulsingCellHighlight> createState() => _PulsingCellHighlightState();
+}
+
+class _PulsingCellHighlightState extends State<PulsingCellHighlight> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    // Tạo hiệu ứng lặp đi lặp lại (reverse: true để tự động mờ dần rồi sáng lại)
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+    
+    // Điều chỉnh độ mờ (opacity) nhấp nháy nhẹ nhàng từ 0.12 đến 0.40
+    _animation = Tween<double>(begin: 0.12, end: 0.40).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            color: widget.color.withOpacity(_animation.value),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: widget.child,
+        );
+      },
+    );
   }
 }
