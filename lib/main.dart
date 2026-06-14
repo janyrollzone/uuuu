@@ -1,17 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'config/supabase_config.dart';
 import 'models/game_provider.dart';
 import 'screens/menu_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  await Supabase.initialize(
-    url: 'https://xnlwdscfszfapqizzxej.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhubHdkc2Nmc3pmYXBxaXp6eGVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MTcwMTgsImV4cCI6MjA5NjI5MzAxOH0.2cxNRmFnf2eTOfwmprg0HT_tPe9bBQGpSTxrwd3RpX0',
-  );
-
+  try {
+    if (SupabaseConfig.url.isNotEmpty &&
+        SupabaseConfig.anonKey.isNotEmpty &&
+        SupabaseConfig.anonKey != 'YOUR_SUPABASE_ANON_KEY') {
+      await Supabase.initialize(
+        url: SupabaseConfig.url,
+        anonKey: SupabaseConfig.anonKey,
+      );
+      SupabaseConfig.isInitialized = true;
+    } else {
+      debugPrint('Supabase is not initialized: URL or Anon Key is missing or placeholder.');
+    }
+  } catch (e) {
+    debugPrint('Failed to initialize Supabase: $e');
+  }
+  
   runApp(
     ChangeNotifierProvider(
       create: (context) => GameProvider(),

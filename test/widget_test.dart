@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:caro_game/models/game_provider.dart';
 import 'package:caro_game/services/ai_service.dart';
+import 'package:caro_game/services/audio_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -11,6 +12,7 @@ void main() {
 
     setUp(() {
       SharedPreferences.setMockInitialValues({});
+      AudioService.isTesting = true;
       provider = GameProvider();
     });
 
@@ -93,7 +95,7 @@ void main() {
       expect(provider.gems, 35);
     });
 
-    test('Thắng trận PvP được cộng 3 đá quý', () {
+    test('Thắng trận PvP được cộng 3 đá quý kèm 1 đá quý thưởng chuỗi thắng', () {
       provider.setGameMode('PvP');
       provider.setBoardSize(3);
 
@@ -104,8 +106,8 @@ void main() {
       provider.makeMove(2); // X thắng
 
       expect(provider.status, GameStatus.won);
-      expect(provider.gems, 23); // 20 + 3
-      expect(provider.lastEarnedGems, 3);
+      expect(provider.gems, 24); // 20 + 3 (base) + 1 (streak bonus)
+      expect(provider.lastEarnedGems, 4);
     });
   });
 

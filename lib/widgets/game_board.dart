@@ -101,11 +101,7 @@ class _GameBoardState extends State<GameBoard> with SingleTickerProviderStateMix
                             if (provider.hapticEnabled) {
                               HapticFeedback.lightImpact();
                             }
-                            
-                            // Sound feedback
-                            if (provider.soundEnabled) {
-                              SystemSound.play(SystemSoundType.click);
-                            }
+
 
                             provider.makeMove(index);
                           }

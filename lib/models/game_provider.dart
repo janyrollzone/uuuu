@@ -3,7 +3,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config/supabase_config.dart';
 import '../services/ai_service.dart';
+import '../services/audio_service.dart';
 
 enum GameStatus { playing, won, draw }
 
@@ -31,7 +33,7 @@ class GameProvider extends ChangeNotifier {
   bool _hapticEnabled = true;
 
   // Supabase states
-  final SupabaseClient _supabase = Supabase.instance.client;
+  late final SupabaseClient? _supabase;
   Map<String, dynamic>? _userProfile;
   bool _isSyncing = false;
   String? _onlineMatchId;
@@ -78,7 +80,7 @@ class GameProvider extends ChangeNotifier {
   // Supabase getters
   Map<String, dynamic>? get userProfile => _userProfile;
   bool get isSyncing => _isSyncing;
-  bool get isLoggedIn => _supabase.auth.currentUser != null;
+  bool get isLoggedIn => _supabase != null && _supabase!.auth.currentUser != null;
   String? get onlineMatchId => _onlineMatchId;
   String get onlineRole => _onlineRole;
   String get onlineOpponentName => _onlineOpponentName;
@@ -98,6 +100,16 @@ class GameProvider extends ChangeNotifier {
   bool get canUndo => _history.isNotEmpty;
 
   GameProvider() {
+    if (SupabaseConfig.isInitialized) {
+      try {
+        _supabase = Supabase.instance.client;
+      } catch (e) {
+        debugPrint('Error accessing Supabase client: $e');
+        _supabase = null;
+      }
+    } else {
+      _supabase = null;
+    }
     _loadStatsAndSettings();
   }
 
@@ -110,6 +122,7 @@ class GameProvider extends ChangeNotifier {
     _winStreak = prefs.getInt('winStreak') ?? 0;
     _bestWinStreak = prefs.getInt('bestWinStreak') ?? 0;
     _soundEnabled = prefs.getBool('soundEnabled') ?? true;
+    AudioService.soundEnabled = _soundEnabled;
     _hapticEnabled = prefs.getBool('hapticEnabled') ?? true;
     _boardSize = prefs.getInt('boardSize') ?? 10;
     
@@ -126,7 +139,7 @@ class GameProvider extends ChangeNotifier {
     _board = List.filled(_boardSize * _boardSize, null);
     
     // Fetch profile if already logged in on startup
-    if (_supabase.auth.currentUser != null) {
+    if (isLoggedIn) {
       await _fetchProfile();
     }
     
@@ -142,7 +155,7 @@ class GameProvider extends ChangeNotifier {
     await prefs.setInt('winStreak', _winStreak);
     await prefs.setInt('bestWinStreak', _bestWinStreak);
     
-    if (_supabase.auth.currentUser != null) {
+    if (isLoggedIn) {
       _pushStatsToCloud();
     }
   }
@@ -153,7 +166,7 @@ class GameProvider extends ChangeNotifier {
     await prefs.setString('selectedTheme', _selectedTheme);
     await prefs.setString('selectedMarker', _selectedMarker);
     
-    if (_supabase.auth.currentUser != null) {
+    if (isLoggedIn) {
       _pushStatsToCloud();
     }
   }
@@ -171,6 +184,10 @@ class GameProvider extends ChangeNotifier {
 
   void toggleSound() {
     _soundEnabled = !_soundEnabled;
+    AudioService.soundEnabled = _soundEnabled;
+    if (_soundEnabled) {
+      AudioService.playClick();
+    }
     _saveSettings();
     notifyListeners();
   }
@@ -178,6 +195,7 @@ class GameProvider extends ChangeNotifier {
   void toggleHaptic() {
     _hapticEnabled = !_hapticEnabled;
     _saveSettings();
+    AudioService.playClick();
     notifyListeners();
   }
 
@@ -190,6 +208,7 @@ class GameProvider extends ChangeNotifier {
         _isSearchingMatch = false;
       }
       _gameMode = mode;
+      AudioService.playClick();
       resetBoard();
     }
   }
@@ -197,6 +216,7 @@ class GameProvider extends ChangeNotifier {
   void setDifficulty(String diff) {
     if (diff == 'Easy' || diff == 'Medium' || diff == 'Hard') {
       _difficulty = diff;
+      AudioService.playClick();
       resetBoard();
     }
   }
@@ -205,6 +225,7 @@ class GameProvider extends ChangeNotifier {
     if (size >= 3 && size <= 15) {
       _boardSize = size;
       _saveBoardSize();
+      AudioService.playClick();
       resetBoard();
     }
   }
@@ -217,6 +238,7 @@ class GameProvider extends ChangeNotifier {
     _winStreak = 0;
     _bestWinStreak = 0;
     _saveStats();
+    AudioService.playUndo();
     notifyListeners();
   }
 
@@ -252,6 +274,7 @@ class GameProvider extends ChangeNotifier {
 
     if (_status == GameStatus.playing) {
       _currentPlayer = _currentPlayer == 'X' ? 'O' : 'X';
+      AudioService.playMove();
       notifyListeners();
 
       // If computer mode, trigger computer move
@@ -298,6 +321,7 @@ class GameProvider extends ChangeNotifier {
       _winningLine = [];
     }
 
+    AudioService.playUndo();
     notifyListeners();
   }
 
@@ -321,6 +345,7 @@ class GameProvider extends ChangeNotifier {
 
       if (_status == GameStatus.playing) {
         _currentPlayer = 'X';
+        AudioService.playMove();
       }
     }
 
@@ -393,6 +418,7 @@ class GameProvider extends ChangeNotifier {
       _winStreak = 0;
       _lastEarnedGems = 0;
       _saveStats();
+      AudioService.playDraw();
     }
   }
 
@@ -432,6 +458,22 @@ class GameProvider extends ChangeNotifier {
       _lastEarnedGems = 0;
     }
     _saveStats();
+
+    if (_gameMode == 'PvC') {
+      if (token == 'X') {
+        AudioService.playWin();
+      } else {
+        AudioService.playLose();
+      }
+    } else if (_gameMode == 'Online') {
+      if (token == _onlineRole) {
+        AudioService.playWin();
+      } else {
+        AudioService.playLose();
+      }
+    } else {
+      AudioService.playWin();
+    }
   }
 
   /// Hồi sinh người chơi bằng cách trừ đá quý và hoàn tác nước đi chiến thắng của máy
@@ -457,6 +499,7 @@ class GameProvider extends ChangeNotifier {
     _winningLine = [];
     _lastEarnedGems = 0;
     _saveStats();
+    AudioService.playSuccess();
     notifyListeners();
   }
 
@@ -494,7 +537,7 @@ class GameProvider extends ChangeNotifier {
     _onlineMatchId = data['id']?.toString();
     _onlineOpponentName = '';
 
-    final user = _supabase.auth.currentUser;
+    final user = isLoggedIn ? _supabase!.auth.currentUser : null;
     if (user != null) {
       final playerXId = data['player_x_id']?.toString();
       _onlineRole = playerXId == user.id ? 'X' : 'O';
@@ -506,9 +549,19 @@ class GameProvider extends ChangeNotifier {
     }
 
     final remoteBoardSize = data['board_size'];
+    bool hasNewMove = false;
     if (remoteBoardSize is int && remoteBoardSize >= 3 && remoteBoardSize <= 15) {
       _boardSize = remoteBoardSize;
-      _board = _boardFromRemote(data['board']);
+      final newBoard = _boardFromRemote(data['board']);
+      if (_board.length == newBoard.length) {
+        for (int i = 0; i < _board.length; i++) {
+          if (_board[i] == null && newBoard[i] != null) {
+            hasNewMove = true;
+            break;
+          }
+        }
+      }
+      _board = newBoard;
       if (_board.length != _boardSize * _boardSize) {
         _board = List.filled(_boardSize * _boardSize, null);
       }
@@ -528,7 +581,8 @@ class GameProvider extends ChangeNotifier {
     }
 
     if (status == 'finished') {
-      if (_status == GameStatus.playing) {
+      final bool statusChanged = _status == GameStatus.playing;
+      if (statusChanged) {
         if (winner == 'X') {
           _xWins++;
         } else if (winner == 'O') {
@@ -546,10 +600,26 @@ class GameProvider extends ChangeNotifier {
       _isSearchingMatch = false;
       _stopOnlineMatchPolling();
       _onlineMatchId = null;
+
+      if (statusChanged) {
+        if (_status == GameStatus.won) {
+          if (winner == _onlineRole) {
+            AudioService.playWin();
+          } else {
+            AudioService.playLose();
+          }
+        } else {
+          AudioService.playDraw();
+        }
+      }
     } else {
       _status = GameStatus.playing;
       _currentPlayer = data['current_player']?.toString() ?? 'X';
       _isSearchingMatch = status == 'waiting';
+
+      if (hasNewMove) {
+        AudioService.playMove();
+      }
     }
   }
 
@@ -566,7 +636,7 @@ class GameProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final match = await _supabase.rpc(
+      final match = await _supabase!.rpc(
         'find_or_create_online_match',
         params: {
           'p_board_size': _boardSize,
@@ -589,12 +659,12 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> _pollOnlineMatch() async {
-    if (_onlineMatchId == null || _supabase.auth.currentUser == null) {
+    if (_onlineMatchId == null || !isLoggedIn) {
       return;
     }
 
     try {
-      final data = await _supabase
+      final data = await _supabase!
           .from('online_matches')
           .select()
           .eq('id', _onlineMatchId!)
@@ -616,7 +686,7 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> leaveOnlineMatch() async {
-    if (_onlineMatchId == null || _supabase.auth.currentUser == null) {
+    if (_onlineMatchId == null || !isLoggedIn) {
       _stopOnlineMatchPolling();
       _onlineMatchId = null;
       _isSearchingMatch = false;
@@ -629,7 +699,7 @@ class GameProvider extends ChangeNotifier {
     _stopOnlineMatchPolling();
 
     try {
-      await _supabase.from('online_matches').update({
+      await _supabase!.from('online_matches').update({
         'status': 'finished',
         'winner': null,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
@@ -646,7 +716,8 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> _submitOnlineMove(int index) async {
-    final user = _supabase.auth.currentUser;
+    if (!isLoggedIn) return;
+    final user = _supabase!.auth.currentUser;
     if (user == null || _onlineMatchId == null || _status != GameStatus.playing) {
       return;
     }
@@ -666,12 +737,13 @@ class GameProvider extends ChangeNotifier {
 
     if (_status == GameStatus.playing) {
       _currentPlayer = _currentPlayer == 'X' ? 'O' : 'X';
+      AudioService.playMove();
     }
 
     notifyListeners();
 
     try {
-      await _supabase.from('online_matches').update({
+      await _supabase!.from('online_matches').update({
         'board': _board,
         'current_player': _currentPlayer,
         'status': _status == GameStatus.playing ? 'active' : 'finished',
@@ -690,11 +762,12 @@ class GameProvider extends ChangeNotifier {
   // ==========================================
 
   Future<void> _fetchProfile() async {
-    final user = _supabase.auth.currentUser;
+    if (!isLoggedIn) return;
+    final user = _supabase!.auth.currentUser;
     if (user == null) return;
 
     try {
-      final data = await _supabase
+      final data = await _supabase!
           .from('profiles')
           .select()
           .eq('id', user.id)
@@ -750,11 +823,12 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> _pushStatsToCloud() async {
-    final user = _supabase.auth.currentUser;
+    if (!isLoggedIn) return;
+    final user = _supabase!.auth.currentUser;
     if (user == null) return;
 
     try {
-      await _supabase.from('profiles').update({
+      await _supabase!.from('profiles').update({
         'gems': _gems,
         'x_wins': _xWins,
         'o_wins': _oWins,
@@ -782,10 +856,11 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> register(String email, String password, String username) async {
+    if (_supabase == null) throw Exception('Supabase chưa được cấu hình.');
     _isSyncing = true;
     notifyListeners();
     try {
-      final response = await _supabase.auth.signUp(
+      final response = await _supabase!.auth.signUp(
         email: email,
         password: password,
         data: {
@@ -809,10 +884,11 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> login(String email, String password) async {
+    if (_supabase == null) throw Exception('Supabase chưa được cấu hình.');
     _isSyncing = true;
     notifyListeners();
     try {
-      final response = await _supabase.auth.signInWithPassword(
+      final response = await _supabase!.auth.signInWithPassword(
         email: email,
         password: password,
       );
@@ -827,13 +903,14 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    if (_supabase == null) return;
     _isSyncing = true;
     notifyListeners();
     try {
       if (_onlineMatchId != null) {
         await leaveOnlineMatch();
       }
-      await _supabase.auth.signOut();
+      await _supabase!.auth.signOut();
       _userProfile = null;
     } finally {
       _isSyncing = false;
@@ -842,13 +919,14 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> updateUsername(String newUsername) async {
-    final user = _supabase.auth.currentUser;
+    if (!isLoggedIn) return;
+    final user = _supabase!.auth.currentUser;
     if (user == null) return;
 
     _isSyncing = true;
     notifyListeners();
     try {
-      await _supabase.from('profiles').update({
+      await _supabase!.from('profiles').update({
         'username': newUsername,
       }).eq('id', user.id);
 
@@ -862,7 +940,8 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<void> changePassword(String currentPassword, String newPassword) async {
-    final user = _supabase.auth.currentUser;
+    if (!isLoggedIn) return;
+    final user = _supabase!.auth.currentUser;
     if (user == null) return;
 
     final email = user.email;
@@ -873,12 +952,12 @@ class GameProvider extends ChangeNotifier {
     _isSyncing = true;
     notifyListeners();
     try {
-      await _supabase.auth.signInWithPassword(
+      await _supabase!.auth.signInWithPassword(
         email: email,
         password: currentPassword,
       );
 
-      await _supabase.auth.updateUser(
+      await _supabase!.auth.updateUser(
         UserAttributes(password: newPassword),
       );
     } finally {
@@ -888,8 +967,9 @@ class GameProvider extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> fetchLeaderboard() async {
+    if (_supabase == null) return [];
     try {
-      final data = await _supabase
+      final data = await _supabase!
           .from('profiles')
           .select('username, x_wins, gems')
           .order('x_wins', ascending: false)
@@ -908,6 +988,7 @@ class GameProvider extends ChangeNotifier {
 
   Future<bool> buyItem(ShopItem item) async {
     if (_gems < item.price || _unlockedItems.contains(item.id)) {
+      AudioService.playUndo();
       return false;
     }
     
@@ -923,6 +1004,7 @@ class GameProvider extends ChangeNotifier {
     
     await _saveStats();
     await _saveShopSettings();
+    AudioService.playSuccess();
     notifyListeners();
     return true;
   }
@@ -937,6 +1019,7 @@ class GameProvider extends ChangeNotifier {
     }
     
     _saveShopSettings();
+    AudioService.playSuccess();
     notifyListeners();
   }
 }
